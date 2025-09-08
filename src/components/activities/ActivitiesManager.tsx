@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { Database } from "@/lib/supabase-config";
 import { cn } from "@/lib/utils";
@@ -60,6 +60,19 @@ export function ActivitiesManager({ userId }: { userId: string }) {
   const [levels, setLevels] = useState<{ id: string; name: string }[]>([]);
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedLevel, setSelectedLevel] = useState("");
+  // Editing / deleting state
+  const [editingActivity, setEditingActivity] = useState<ActivityRow | null>(
+    null
+  );
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [existingAssets, setExistingAssets] = useState<
+    Database["public"]["Tables"]["assets"]["Row"][]
+  >([]);
+  // Confirm dialog state
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const [confirmMessage, setConfirmMessage] = useState("");
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const confirmActionRef = useRef<null | (() => Promise<void> | void)>(null);
 
   const resetForm = () => {
     setTitle("");
@@ -71,6 +84,8 @@ export function ActivitiesManager({ userId }: { userId: string }) {
     setUploadProgress({});
     setSelectedCategory("");
     setSelectedLevel("");
+    setEditingActivity(null);
+    setExistingAssets([]);
   };
 
   const fetchActivities = useCallback(async () => {
@@ -148,14 +163,36 @@ export function ActivitiesManager({ userId }: { userId: string }) {
       if (algorithmCorrection.trim())
         basePayload.algorithm_correction = algorithmCorrection;
       if (codeCorrection.trim()) basePayload.code_correction = codeCorrection;
-
-      const { data: activity, error: insertError } = await supabase
-        .from("activities")
-        .insert(basePayload)
-        .select()
-        .single();
-      if (insertError || !activity)
-        throw insertError || new Error("Insert failed");
+      let activity: ActivityRow | null = null;
+      if (editingActivity) {
+        // Update path
+        const { data, error: updErr } = await supabase
+          .from("activities")
+          .update({
+            title: basePayload.title,
+            description: basePayload.description,
+            content: basePayload.content,
+            algorithm_correction: basePayload.algorithm_correction,
+            code_correction: basePayload.code_correction,
+            category_id: basePayload.category_id,
+            level_id: basePayload.level_id,
+          })
+          .eq("id", editingActivity.id)
+          .select("*, assets(*)")
+          .single();
+        if (updErr || !data) throw updErr || new Error("Update failed");
+        activity = data as ActivityRow;
+      } else {
+        const { data: inserted, error: insertError } = await supabase
+          .from("activities")
+          .insert(basePayload)
+          .select("*, assets(*)")
+          .single();
+        if (insertError || !inserted)
+          throw insertError || new Error("Insert failed");
+        activity = inserted as ActivityRow;
+      }
+      if (!activity) throw new Error("Activity missing after save");
 
       // Upload assets sequentially (can optimize later)
       const uploadedAssets: Database["public"]["Tables"]["assets"]["Insert"][] =
@@ -184,7 +221,9 @@ export function ActivitiesManager({ userId }: { userId: string }) {
           .insert(uploadedAssets);
         if (assetsErr) throw assetsErr;
       }
-      setSuccess("Activity created successfully");
+      setSuccess(
+        editingActivity ? "Activity updated" : "Activity created successfully"
+      );
       resetForm();
       setOpen(false);
       fetchActivities();
@@ -216,15 +255,133 @@ export function ActivitiesManager({ userId }: { userId: string }) {
     }
   }
 
+  function startCreate() {
+    resetForm();
+    setOpen(true);
+  }
+
+  function startEdit(a: ActivityRow) {
+    setEditingActivity(a);
+    setTitle(a.title || "");
+    setDescription(a.description || "");
+    setContent(a.content || "");
+    setAlgorithmCorrection(a.algorithm_correction || "");
+    setCodeCorrection(a.code_correction || "");
+    setSelectedCategory(a.category_id || "");
+    setSelectedLevel(a.level_id || "");
+    setExistingAssets(a.assets || []);
+    setFiles([]); // new uploads separate
+    setOpen(true);
+  }
+
+  async function performDelete(a: ActivityRow) {
+    setDeletingId(a.id);
+    try {
+      // Delete assets first (DB + storage)
+      if (a.assets && a.assets.length) {
+        // Remove storage objects
+        const paths: string[] = [];
+        for (const asset of a.assets) {
+          if (asset.file_url) {
+            const idx = asset.file_url.indexOf("/object/public/");
+            if (idx !== -1) {
+              const rel = asset.file_url.substring(
+                idx + "/object/public/".length
+              ); // includes bucket
+              if (rel.startsWith(`${BUCKET}/`)) {
+                paths.push(rel.substring(BUCKET.length + 1));
+              }
+            }
+          }
+        }
+        if (paths.length) {
+          await supabase.storage.from(BUCKET).remove(paths);
+        }
+        await supabase.from("assets").delete().eq("activity_id", a.id);
+      }
+      const { error: delErr } = await supabase
+        .from("activities")
+        .delete()
+        .eq("id", a.id);
+      if (delErr) throw delErr;
+      setActivities((prev) => prev.filter((x) => x.id !== a.id));
+    } catch (err: unknown) {
+      console.error("Delete activity error", err);
+      const message =
+        (typeof err === "object" &&
+        err &&
+        "message" in err &&
+        typeof (err as { message?: unknown }).message === "string"
+          ? (err as { message: string }).message
+          : null) || "Failed to delete activity. Check console for details.";
+      alert(message);
+    } finally {
+      setDeletingId(null);
+    }
+  }
+
+  function requestDeleteActivity(a: ActivityRow) {
+    setConfirmMessage(`Delete activity "${a.title}"? This cannot be undone.`);
+    confirmActionRef.current = async () => {
+      await performDelete(a);
+    };
+    setConfirmOpen(true);
+  }
+
+  async function performRemoveExistingAsset(
+    assetId: string,
+    fileUrl?: string | null
+  ) {
+    if (!editingActivity) return;
+    try {
+      if (fileUrl) {
+        const idx = fileUrl.indexOf("/object/public/");
+        if (idx !== -1) {
+          const rel = fileUrl.substring(idx + "/object/public/".length); // bucket/path
+          if (rel.startsWith(`${BUCKET}/`)) {
+            const path = rel.substring(BUCKET.length + 1);
+            await supabase.storage.from(BUCKET).remove([path]);
+          }
+        }
+      }
+      const { error: delErr } = await supabase
+        .from("assets")
+        .delete()
+        .eq("id", assetId);
+      if (delErr) throw delErr;
+      setExistingAssets((prev) => prev.filter((a) => a.id !== assetId));
+      // refresh activities list quietly
+      fetchActivities();
+    } catch (err: unknown) {
+      console.error("Remove asset error", err);
+      const message =
+        (typeof err === "object" &&
+        err &&
+        "message" in err &&
+        typeof (err as { message?: unknown }).message === "string"
+          ? (err as { message: string }).message
+          : null) || "Failed to remove asset";
+      alert(message);
+    }
+  }
+
+  function requestRemoveExistingAsset(
+    assetId: string,
+    fileUrl?: string | null
+  ) {
+    setConfirmMessage("Remove this file?");
+    confirmActionRef.current = async () => {
+      await performRemoveExistingAsset(assetId, fileUrl);
+    };
+    setConfirmOpen(true);
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h2 className="text-base font-semibold tracking-tight">Activities</h2>
         <button
-          onClick={() => {
-            resetForm();
-            setOpen(true);
-          }}
+          onClick={startCreate}
           className="inline-flex items-center gap-2 rounded-md bg-indigo-600 text-white text-sm font-medium px-4 py-2 shadow hover:bg-indigo-600/90 active:scale-[.98] transition"
         >
           <span className="inline-block">Nouvelle activité</span>
@@ -240,18 +397,19 @@ export function ActivitiesManager({ userId }: { userId: string }) {
               <th className="py-2 px-4 font-medium">Description</th>
               <th className="py-2 px-4 font-medium">Created</th>
               <th className="py-2 px-4 font-medium">Files</th>
+              <th className="py-2 px-4 font-medium">Actions</th>
             </tr>
           </thead>
           <tbody>
             {loading ? (
               <tr>
-                <td colSpan={4} className="py-8 text-center text-neutral-400">
+                <td colSpan={5} className="py-8 text-center text-neutral-400">
                   Loading...
                 </td>
               </tr>
             ) : activities.length === 0 ? (
               <tr>
-                <td colSpan={4} className="py-8 text-center text-neutral-400">
+                <td colSpan={5} className="py-8 text-center text-neutral-400">
                   No activities yet.
                 </td>
               </tr>
@@ -273,6 +431,21 @@ export function ActivitiesManager({ userId }: { userId: string }) {
                   <td className="py-2 px-4 text-neutral-600 dark:text-neutral-400 text-xs">
                     {a.assets?.length || 0}
                   </td>
+                  <td className="py-2 px-4 text-xs flex gap-2">
+                    <button
+                      onClick={() => startEdit(a)}
+                      className="px-2 py-1 rounded border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    >
+                      Edit
+                    </button>
+                    <button
+                      onClick={() => requestDeleteActivity(a)}
+                      disabled={deletingId === a.id}
+                      className="px-2 py-1 rounded border border-rose-300 text-rose-600 hover:bg-rose-50 dark:border-rose-700 dark:hover:bg-rose-900/30 disabled:opacity-50"
+                    >
+                      {deletingId === a.id ? "..." : "Delete"}
+                    </button>
+                  </td>
                 </tr>
               ))
             )}
@@ -291,10 +464,12 @@ export function ActivitiesManager({ userId }: { userId: string }) {
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h3 className="text-lg font-semibold tracking-tight">
-                  Nouvelle activité
+                  {editingActivity ? "Edit Activity" : "Nouvelle activité"}
                 </h3>
                 <p className="text-xs text-neutral-500 dark:text-neutral-400">
-                  Create a new learning activity
+                  {editingActivity
+                    ? "Modify the activity details"
+                    : "Create a new learning activity"}
                 </p>
               </div>
               <button
@@ -427,7 +602,46 @@ export function ActivitiesManager({ userId }: { userId: string }) {
                 </div>
               </div>
 
-              {/* File Upload */}
+              {/* Existing Assets (Edit) */}
+              {editingActivity && existingAssets.length > 0 && (
+                <div className="space-y-2">
+                  <label className="text-xs font-medium uppercase tracking-wide text-neutral-600 dark:text-neutral-300">
+                    Existing Files
+                  </label>
+                  <ul className="space-y-1 text-xs max-h-40 overflow-y-auto">
+                    {existingAssets.map((asset) => (
+                      <li
+                        key={asset.id}
+                        className="flex items-center justify-between rounded bg-white/70 dark:bg-neutral-800/70 px-2 py-1"
+                      >
+                        <a
+                          href={asset.file_url || undefined}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="truncate max-w-[60%] underline hover:text-indigo-600"
+                        >
+                          {asset.name}
+                        </a>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            requestRemoveExistingAsset(
+                              asset.id,
+                              asset.file_url || undefined
+                            )
+                          }
+                          className="text-rose-500 hover:text-rose-600"
+                          aria-label="Remove asset"
+                        >
+                          ×
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {/* File Upload (new) */}
               <div className="space-y-2">
                 <label className="text-xs font-medium uppercase tracking-wide text-neutral-600 dark:text-neutral-300">
                   Files (PDF, images)
@@ -500,10 +714,67 @@ export function ActivitiesManager({ userId }: { userId: string }) {
                   className="inline-flex items-center gap-2 rounded-md bg-indigo-600 text-white text-sm font-medium px-5 py-2.5 shadow hover:bg-indigo-600/90 active:scale-[.97] disabled:opacity-60"
                 >
                   {saving && <Spinner />}
-                  <span>Save Activity</span>
+                  <span>
+                    {editingActivity ? "Update Activity" : "Save Activity"}
+                  </span>
                 </button>
+                {editingActivity && (
+                  <button
+                    type="button"
+                    onClick={() =>
+                      editingActivity && requestDeleteActivity(editingActivity)
+                    }
+                    disabled={deletingId === editingActivity.id}
+                    className="px-4 py-2 text-sm rounded-md border border-rose-300 text-rose-600 hover:bg-rose-50 dark:border-rose-700 dark:hover:bg-rose-900/30 disabled:opacity-50"
+                  >
+                    {deletingId === editingActivity.id
+                      ? "Deleting..."
+                      : "Delete"}
+                  </button>
+                )}
               </div>
             </form>
+          </div>
+        </div>
+      )}
+      {/* Confirm Dialog */}
+      {confirmOpen && (
+        <div className="fixed inset-0 z-60 flex items-center justify-center p-4">
+          <div
+            className="absolute inset-0 bg-neutral-900/50 backdrop-blur-sm"
+            onClick={() => !confirmBusy && setConfirmOpen(false)}
+          />
+          <div className="relative w-full max-w-sm rounded-lg border border-indigo-100 dark:border-neutral-800 bg-white/90 dark:bg-neutral-900/90 backdrop-blur shadow-xl p-5 space-y-4">
+            <h4 className="text-sm font-semibold tracking-tight">Confirm</h4>
+            <p className="text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed">
+              {confirmMessage}
+            </p>
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                onClick={() => !confirmBusy && setConfirmOpen(false)}
+                className="px-3 py-1.5 text-xs rounded-md border border-neutral-300 dark:border-neutral-700 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                disabled={confirmBusy}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!confirmActionRef.current) return;
+                  setConfirmBusy(true);
+                  try {
+                    await confirmActionRef.current();
+                    setConfirmOpen(false);
+                  } finally {
+                    setConfirmBusy(false);
+                    confirmActionRef.current = null;
+                  }
+                }}
+                disabled={confirmBusy}
+                className="px-3 py-1.5 text-xs rounded-md bg-rose-600 text-white hover:bg-rose-600/90 disabled:opacity-60"
+              >
+                {confirmBusy ? "Working..." : "Confirm"}
+              </button>
+            </div>
           </div>
         </div>
       )}
