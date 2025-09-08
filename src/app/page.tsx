@@ -58,7 +58,9 @@ export default async function Home() {
         <StatsCards metrics={metrics} />
         {/* Placeholder for future charts / recent activity */}
         <div className="rounded-lg border border-dashed border-indigo-200/70 dark:border-neutral-700 p-6 text-center bg-white/60 dark:bg-neutral-900/60 backdrop-blur">
-          <h3 className="text-sm font-semibold mb-1 tracking-tight">More Insights Coming</h3>
+          <h3 className="text-sm font-semibold mb-1 tracking-tight">
+            More Insights Coming
+          </h3>
           <p className="text-xs text-neutral-500 dark:text-neutral-400 max-w-md mx-auto">
             Add categories, levels and activities to populate deeper analytics.
           </p>

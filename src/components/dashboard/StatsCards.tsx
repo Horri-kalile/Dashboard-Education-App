@@ -2,7 +2,14 @@
 import { TrendingUp } from "lucide-react";
 import { useMemo } from "react";
 import { cn } from "@/lib/utils";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  CardFooter,
+} from "@/components/ui/card";
 
 export type StatMetric = {
   label: string;
@@ -14,7 +21,19 @@ export type StatMetric = {
   target?: number; // optional target to compute progress
 };
 
-function RadialGauge({ value, max = 100, size = 140, stroke = 12, color = "#4f46e5" }: { value: number; max?: number; size?: number; stroke?: number; color?: string }) {
+function RadialGauge({
+  value,
+  max = 100,
+  size = 140,
+  stroke = 12,
+  color = "#4f46e5",
+}: {
+  value: number;
+  max?: number;
+  size?: number;
+  stroke?: number;
+  color?: string;
+}) {
   const clamped = Math.max(0, Math.min(value, max));
   const radius = (size - stroke) / 2;
   const circumference = 2 * Math.PI * radius;
@@ -68,14 +87,19 @@ function TrendBadge({ percent }: { percent: number }) {
       )}
     >
       {positive ? "+" : ""}
-      {percent.toFixed(1)}%
-      {positive && <TrendingUp className="h-3 w-3" />}
+      {percent.toFixed(1)}%{positive && <TrendingUp className="h-3 w-3" />}
     </span>
   );
 }
 
 function StatCard({ metric }: { metric: StatMetric }) {
-  const { label, value, trendPercent, help, colorClass = "text-indigo-600" } = metric;
+  const {
+    label,
+    value,
+    trendPercent,
+    help,
+    colorClass = "text-indigo-600",
+  } = metric;
   // Compute gauge max heuristically
   const max = useMemo(() => {
     if (!value || value === 0) return 10;
@@ -90,7 +114,9 @@ function StatCard({ metric }: { metric: StatMetric }) {
       <CardHeader className="pb-2">
         <CardTitle className="text-sm font-medium flex items-center justify-between">
           <span>{label}</span>
-          {typeof trendPercent === "number" && <TrendBadge percent={trendPercent} />}
+          {typeof trendPercent === "number" && (
+            <TrendBadge percent={trendPercent} />
+          )}
         </CardTitle>
         {help && <CardDescription>{help}</CardDescription>}
       </CardHeader>
@@ -104,7 +130,9 @@ function StatCard({ metric }: { metric: StatMetric }) {
             />
           </div>
         ) : (
-          <div className="h-[140px] flex items-center justify-center text-xs text-muted-foreground">No data</div>
+          <div className="h-[140px] flex items-center justify-center text-xs text-muted-foreground">
+            No data
+          </div>
         )}
       </CardContent>
       <CardFooter className="pt-0 text-[10px] text-muted-foreground flex flex-col items-start gap-1">
