@@ -2,29 +2,22 @@ import { createClient } from "@/lib/supabase/server";
 import { redirect } from "next/navigation";
 import { DashboardLayout } from "@/components/DashboardLayout";
 
-export default async function Home() {
+export default async function ActivitiesPage() {
   const supabase = await createClient();
-
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  if (!user) {
-    redirect("/login");
-  }
+  if (!user) redirect("/login");
 
   return (
     <DashboardLayout
       userEmail={user.email}
-      description="Overview & quick stats (coming soon)"
+      title="Activities"
+      description="Manage and publish learning activities"
     >
       <div className="rounded-lg border border-dashed border-indigo-200/70 dark:border-neutral-700 p-10 text-center bg-white/60 dark:bg-neutral-900/60 backdrop-blur">
-        <h3 className="text-lg font-semibold mb-2 tracking-tight">
-          Dashboard Content
-        </h3>
-        <p className="text-sm text-neutral-500 dark:text-neutral-400 max-w-md mx-auto">
-          Your dashboard components will appear here. Start by creating
-          activities, categories and levels.
+        <p className="text-sm text-neutral-500 dark:text-neutral-400">
+          Activities management interface coming soon.
         </p>
       </div>
     </DashboardLayout>
