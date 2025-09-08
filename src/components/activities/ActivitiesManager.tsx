@@ -53,6 +53,13 @@ export function ActivitiesManager({ userId }: { userId: string }) {
   const [content, setContent] = useState("");
   const [algorithmCorrection, setAlgorithmCorrection] = useState("");
   const [codeCorrection, setCodeCorrection] = useState("");
+  // Dynamic taxonomy
+  const [categories, setCategories] = useState<{ id: string; name: string }[]>(
+    []
+  );
+  const [levels, setLevels] = useState<{ id: string; name: string }[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState("");
+  const [selectedLevel, setSelectedLevel] = useState("");
 
   const resetForm = () => {
     setTitle("");
@@ -62,6 +69,8 @@ export function ActivitiesManager({ userId }: { userId: string }) {
     setCodeCorrection("");
     setFiles([]);
     setUploadProgress({});
+    setSelectedCategory("");
+    setSelectedLevel("");
   };
 
   const fetchActivities = useCallback(async () => {
@@ -78,6 +87,23 @@ export function ActivitiesManager({ userId }: { userId: string }) {
   useEffect(() => {
     fetchActivities();
   }, [fetchActivities]);
+
+  // Load categories & levels once
+  useEffect(() => {
+    (async () => {
+      const [
+        { data: catData, error: catErr },
+        { data: lvlData, error: lvlErr },
+      ] = await Promise.all([
+        supabase.from("categories").select("id, name").order("name"),
+        supabase.from("levels").select("id, name").order("name"),
+      ]);
+      if (catErr) console.error("Categories load error", catErr);
+      if (lvlErr) console.error("Levels load error", lvlErr);
+      if (catData) setCategories(catData as { id: string; name: string }[]);
+      if (lvlData) setLevels(lvlData as { id: string; name: string }[]);
+    })();
+  }, [supabase]);
 
   const onDropFiles = (incoming: FileList | null) => {
     if (!incoming) return;
@@ -101,6 +127,10 @@ export function ActivitiesManager({ userId }: { userId: string }) {
       setError("Title, Description and HTML Content are required.");
       return;
     }
+    if (!selectedCategory || !selectedLevel) {
+      setError("Category and Level are required.");
+      return;
+    }
     setSaving(true);
     try {
       // Build payload dynamically to avoid referencing columns that might not yet exist in DB
@@ -111,7 +141,9 @@ export function ActivitiesManager({ userId }: { userId: string }) {
         description: description.trim(),
         content,
         created_by: userId,
-        is_published: false,
+        is_published: true, // Auto-publish so it appears in mobile app
+        category_id: selectedCategory,
+        level_id: selectedLevel,
       };
       if (algorithmCorrection.trim())
         basePayload.algorithm_correction = algorithmCorrection;
@@ -341,6 +373,26 @@ export function ActivitiesManager({ userId }: { userId: string }) {
                     placeholder="Explain algorithmic thinking..."
                     className="min-h-[120px] font-mono"
                   />
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+                      Category *
+                    </label>
+                    <select
+                      required
+                      value={selectedCategory}
+                      onChange={(e) => setSelectedCategory(e.target.value)}
+                      className="w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white/70 dark:bg-neutral-800/70 px-2 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-500/60 focus:border-indigo-500"
+                    >
+                      <option value="" disabled>
+                        {categories.length ? "Select category" : "Loading..."}
+                      </option>
+                      {categories.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
                 <div className="space-y-2">
                   <label className="text-xs font-medium uppercase tracking-wide text-neutral-600 dark:text-neutral-300">
@@ -352,6 +404,26 @@ export function ActivitiesManager({ userId }: { userId: string }) {
                     placeholder="Show code solution..."
                     className="min-h-[120px] font-mono"
                   />
+                  <div className="space-y-1">
+                    <label className="text-[10px] font-medium uppercase tracking-wide text-neutral-500 dark:text-neutral-400">
+                      Level *
+                    </label>
+                    <select
+                      required
+                      value={selectedLevel}
+                      onChange={(e) => setSelectedLevel(e.target.value)}
+                      className="w-full rounded-md border border-neutral-300 dark:border-neutral-700 bg-white/70 dark:bg-neutral-800/70 px-2 py-2 text-xs outline-none focus:ring-2 focus:ring-indigo-500/60 focus:border-indigo-500"
+                    >
+                      <option value="" disabled>
+                        {levels.length ? "Select level" : "Loading..."}
+                      </option>
+                      {levels.map((l) => (
+                        <option key={l.id} value={l.id}>
+                          {l.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
               </div>
 
