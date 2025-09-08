@@ -36,33 +36,74 @@ export interface Database {
           title: string;
           description: string | null;
           content: string;
-          correction: string | null;
+          algorithm_correction: string | null;
+          code_correction: string | null;
           created_by: string;
           created_at: string;
           updated_at: string;
           is_published: boolean;
+          category_id: string | null;
+          level_id: string | null;
         };
         Insert: {
           id?: string;
           title: string;
           description?: string | null;
           content: string;
-          correction?: string | null;
+          algorithm_correction?: string | null;
+          code_correction?: string | null;
           created_by: string;
           created_at?: string;
           updated_at?: string;
           is_published?: boolean;
+          category_id?: string | null;
+          level_id?: string | null;
         };
         Update: {
           id?: string;
           title?: string;
           description?: string | null;
           content?: string;
-          correction?: string | null;
+          algorithm_correction?: string | null;
+          code_correction?: string | null;
           created_by?: string;
           created_at?: string;
           updated_at?: string;
           is_published?: boolean;
+          category_id?: string | null;
+          level_id?: string | null;
+        };
+      };
+      assets: {
+        Row: {
+          id: string;
+          activity_id: string;
+          name: string;
+          file_url: string;
+          file_size: number | null;
+          file_type: string | null;
+          created_at: string | null;
+          updated_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          activity_id: string;
+          name: string;
+          file_url: string;
+          file_size?: number | null;
+          file_type?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
+        };
+        Update: {
+          id?: string;
+          activity_id?: string;
+          name?: string;
+          file_url?: string;
+          file_size?: number | null;
+          file_type?: string | null;
+          created_at?: string | null;
+          updated_at?: string | null;
         };
       };
       categories: {
